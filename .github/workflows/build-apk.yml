@@ -26,11 +26,11 @@ jobs:
           ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ZIP file not found"
+            echo "ERROR: ZIP file not found"
             exit 1
           fi
 
-          echo "Found ZIP: $ZIP_FILE"
+          echo "ZIP found: $ZIP_FILE"
 
           mkdir -p extracted
           unzip -q "$ZIP_FILE" -d extracted
@@ -38,27 +38,49 @@ jobs:
           PROJECT_DIR=$(find extracted -type f -name "settings.gradle.kts" -printf '%h\n' | head -n 1)
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "Android project not found inside ZIP"
+            echo "ERROR: Android project not found inside ZIP"
             exit 1
           fi
 
-          echo "Project directory: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Android project: $PROJECT_DIR"
 
-      - name: Install Gradle 9.5
+      - name: Fix MainActivity.java
         shell: bash
         run: |
-          curl -L https://services.gradle.org/distributions/gradle-9.5.0-bin.zip -o /tmp/gradle.zip
-          sudo unzip -q /tmp/gradle.zip -d /opt
-          echo "/opt/gradle-9.5.0/bin" >> "$GITHUB_PATH"
+          JAVA_FILE="$PROJECT_DIR/app/src/main/java/com/solarpump/simulator/MainActivity.java"
 
-      - name: Show Android environment
+          if [ ! -f "$JAVA_FILE" ]; then
+            echo "ERROR: MainActivity.java not found"
+            exit 1
+          fi
+
+          echo "Before fix:"
+          head -n 5 "$JAVA_FILE"
+
+          # حذف السطر الأول إذا كان يحتوي فقط على \
+          sed -i '1{/^[[:space:]]*\\[[:space:]]*$/d;}' "$JAVA_FILE"
+
+          echo "After fix:"
+          head -n 5 "$JAVA_FILE"
+
+          if ! grep -q "package com.solarpump.simulator;" "$JAVA_FILE"; then
+            echo "ERROR: Java source is still invalid"
+            exit 1
+          fi
+
+      - name: Setup Gradle 9.5
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "9.5.0"
+
+      - name: Show environment
         shell: bash
         run: |
           java -version
+          gradle --version
           echo "ANDROID_HOME=$ANDROID_HOME"
-          ls "$ANDROID_HOME/platforms" || true
-          ls "$ANDROID_HOME/build-tools" || true
+          echo "PROJECT_DIR=$PROJECT_DIR"
 
       - name: Build APK
         shell: bash
@@ -66,11 +88,19 @@ jobs:
           cd "$PROJECT_DIR"
           gradle :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Prepare APK
+      - name: Find APK
         shell: bash
         run: |
-          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" ./SolarPumpInverterSimulator.apk
-          ls -lh SolarPumpInverterSimulator.apk
+          APK_FILE="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK_FILE" ]; then
+            echo "ERROR: APK was not created"
+            find "$PROJECT_DIR/app/build/outputs" -type f || true
+            exit 1
+          fi
+
+          cp "$APK_FILE" "$GITHUB_WORKSPACE/SolarPumpInverterSimulator.apk"
+          ls -lh "$GITHUB_WORKSPACE/SolarPumpInverterSimulator.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v7
