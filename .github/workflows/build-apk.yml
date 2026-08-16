@@ -48,26 +48,33 @@ jobs:
       - name: Fix MainActivity.java
         shell: bash
         run: |
-          JAVA_FILE="$PROJECT_DIR/app/src/main/java/com/solarpump/simulator/MainActivity.java"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
 
-          if [ ! -f "$JAVA_FILE" ]; then
-            echo "ERROR: MainActivity.java not found"
-            exit 1
-          fi
+          project_dir = os.environ["PROJECT_DIR"]
+          java_file = Path(project_dir) / "app/src/main/java/com/solarpump/simulator/MainActivity.java"
 
-          echo "Before fix:"
-          head -n 5 "$JAVA_FILE"
+          if not java_file.exists():
+              raise SystemExit("ERROR: MainActivity.java not found")
 
-          # حذف السطر الأول إذا كان يحتوي فقط على \
-          sed -i '1{/^[[:space:]]*\\[[:space:]]*$/d;}' "$JAVA_FILE"
+          text = java_file.read_text(encoding="utf-8")
+          lines = text.splitlines()
 
-          echo "After fix:"
-          head -n 5 "$JAVA_FILE"
+          while lines and not lines[0].strip():
+              lines.pop(0)
 
-          if ! grep -q "package com.solarpump.simulator;" "$JAVA_FILE"; then
-            echo "ERROR: Java source is still invalid"
-            exit 1
-          fi
+          if lines and lines[0].strip() == "\\":
+              lines.pop(0)
+
+          java_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+          print("First lines after fix:")
+          print("\n".join(lines[:5]))
+
+          if not any("package com.solarpump.simulator;" in line for line in lines):
+              raise SystemExit("ERROR: Java source is still invalid")
+          PY
 
       - name: Setup Gradle 9.5
         uses: gradle/actions/setup-gradle@v6
